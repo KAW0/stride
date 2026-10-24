@@ -15,6 +15,7 @@ using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewModels;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Game;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Services;
 using Stride.Assets.Presentation.AssetEditors.Gizmos;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
 using Stride.Assets.Presentation.AssetEditors.SceneEditor.ViewModels;
 using Stride.Assets.Presentation.SceneEditor;
 using Stride.Editor.EditorGame.Game;
@@ -159,7 +160,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
         /// <summary>
         /// Clears the selection.
         /// </summary>
-        private void Clear()
+        private void Clear(Action afterSelection = null)
         {
             if (SelectedIds.Count == 0)
                 return;
@@ -168,6 +169,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
             Editor.Dispatcher.InvokeAsync(() =>
             {
                 Editor.ClearSelection();
+                afterSelection?.Invoke();
                 Editor.Controller.InvokeAsync(() => IsControllingMouse = false);
             });
         }
@@ -176,7 +178,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
         /// Resets the selection to the given entity.
         /// </summary>
         /// <param name="entity">The entity that must be selected.</param>
-        private void Set([NotNull] Entity entity)
+        private void Set([NotNull] Entity entity, Action afterSelection = null)
         {
             var entityId = Editor.Controller.GetAbsoluteId(entity);
             if (!SelectableIds.Contains(entityId) || SelectedIds.Count == 1 && SelectedIds.Contains(entityId))
@@ -189,6 +191,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                 Editor.ClearSelection();
                 if (viewModel != null)
                     Editor.SelectedContent.Add(viewModel);
+                afterSelection?.Invoke();
                 Editor.Controller.InvokeAsync(() => IsControllingMouse = false);
             });
         }
@@ -197,7 +200,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
         /// Adds the given entity to the selection.
         /// </summary>
         /// <param name="entity">The entity that must be added to selection.</param>
-        private void Add([NotNull] Entity entity)
+        private void Add([NotNull] Entity entity, Action afterSelection = null)
         {
             var entityId = Editor.Controller.GetAbsoluteId(entity);
             if (!SelectableIds.Contains(entityId) || SelectedIds.Contains(entityId))
@@ -209,6 +212,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                 var viewModel = (EntityHierarchyElementViewModel)Editor.FindPartViewModel(entityId);
                 if (viewModel?.IsSelectable == true)
                     Editor.SelectedContent.Add(viewModel);
+                afterSelection?.Invoke();
                 Editor.Controller.InvokeAsync(() => IsControllingMouse = false);
             });
         }
@@ -217,7 +221,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
         /// Adds the given entity from the selection.
         /// </summary>
         /// <param name="entity">The entity that must be removed from selection.</param>
-        private void Remove([NotNull] Entity entity)
+        private void Remove([NotNull] Entity entity, Action afterSelection = null)
         {
             var entityId = Editor.Controller.GetAbsoluteId(entity);
             if (!SelectedIds.Contains(entityId))
@@ -229,6 +233,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                 var viewModel = (EntityHierarchyElementViewModel)Editor.FindPartViewModel(entityId);
                 if (viewModel != null)
                     Editor.SelectedContent.Remove(viewModel);
+                afterSelection?.Invoke();
                 Editor.Controller.InvokeAsync(() => IsControllingMouse = false);
             });
         }
@@ -455,6 +460,10 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
 
                 if (IsActive)
                 {
+                    var allowDefaultLeftClickSelection = Editor.IsCustomToolDefaultSceneInputEnabled(SceneEditorDefaultInput.LeftClickSelection);
+                    if (Editor.IsCustomToolModeActive() && !allowDefaultLeftClickSelection)
+                        continue;
+
                     // TODO: code largely duplicated in EditorGameMaterialHighlightService. Factorize!
 
                     var screenSize = new Vector2(game.GraphicsDevice.Presenter.BackBuffer.Width, game.GraphicsDevice.Presenter.BackBuffer.Height);
@@ -487,22 +496,26 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                             }
                         }
 
+                        Action afterSelection = null;
+                        if (allowDefaultLeftClickSelection && Editor.CanCustomToolHandleSceneMouseClick(SceneEditorMouseButton.Left))
+                            afterSelection = () => Editor.HandleCustomSceneMouseClick(SceneEditorMouseButton.Left);
+
                         // Ctrl + click on an empty area: do nothing
                         if (entityUnderMouse == null && addToSelection)
                             continue;
 
                         // Click on an empty area: clear selection
                         if (entityUnderMouse == null)
-                            Clear();
+                            Clear(afterSelection);
                         // Click on an entity: select this entity
                         else if (!addToSelection)
-                            Set(entityUnderMouse);
+                            Set(entityUnderMouse, afterSelection);
                         // Ctrl + click on an already selected entity: unselect this entity
                         else if (Contains(entityUnderMouse))
-                            Remove(entityUnderMouse);
+                            Remove(entityUnderMouse, afterSelection);
                         // Ctrl + click on an entity: add this entity to the selection
                         else
-                            Add(entityUnderMouse);
+                            Add(entityUnderMouse, afterSelection);
                     }
                 }
             }

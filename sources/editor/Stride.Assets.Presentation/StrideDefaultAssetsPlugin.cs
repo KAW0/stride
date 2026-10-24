@@ -237,6 +237,9 @@ namespace Stride.Assets.Presentation
             session.SuggestedPackages.Add(new PackageName(typeof(Stride.Video.VideoComponent).Assembly.GetName().Name, new PackageVersion(StrideVersion.NuGetVersion)));
             session.SuggestedPackages.Add(new PackageName(typeof(Stride.Voxels.Module).Assembly.GetName().Name, new PackageVersion(StrideVersion.NuGetVersion)));
             session.SuggestedPackages.Add(new PackageName(typeof(Stride.SpriteStudio.Runtime.SpriteStudioNodeLinkComponent).Assembly.GetName().Name, new PackageVersion(StrideVersion.NuGetVersion)));
+            // Temporary. This should be restricted to editor projects only.
+            session.SuggestedPackages.Add(new PackageName("Stride.Editor.CustomEditors", new PackageVersion(StrideVersion.NuGetVersion)));
+            session.SuggestedPackages.Add(new PackageName("Stride.Editor.CustomEditors.Wpf", new PackageVersion(StrideVersion.NuGetVersion)));
         }
 
         /// <inheritdoc />

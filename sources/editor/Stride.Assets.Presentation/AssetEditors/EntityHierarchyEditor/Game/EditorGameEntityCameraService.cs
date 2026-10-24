@@ -9,6 +9,7 @@ using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewModels;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Game;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Services;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
 using Stride.Assets.Presentation.SceneEditor;
 using Stride.Editor.Engine;
 using Stride.Engine;
@@ -165,6 +166,10 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
             bool lbDown = Game.Input.IsMouseButtonDown(MouseButton.Left);    // TODO: Combine this with UpdateCameraAsOrthographic!
             bool mbDown = Game.Input.IsMouseButtonDown(MouseButton.Middle);
             bool rbDown = Game.Input.IsMouseButtonDown(MouseButton.Right);
+            if (editor.CanCustomToolHandleSceneMouseClick(SceneEditorMouseButton.Middle) && !editor.IsCustomToolDefaultSceneInputEnabled(SceneEditorDefaultInput.MiddleClickCameraControl))
+                mbDown = false;
+            if (editor.CanCustomToolHandleSceneMouseClick(SceneEditorMouseButton.Right) && !editor.IsCustomToolDefaultSceneInputEnabled(SceneEditorDefaultInput.RightClickCameraControl))
+                rbDown = false;
             bool isAltDown = Game.Input.IsKeyDown(Keys.LeftAlt) || Game.Input.IsKeyDown(Keys.RightAlt);
             input.isShiftDown = Game.Input.IsKeyDown(Keys.LeftShift) || Game.Input.IsKeyDown(Keys.RightShift);
 

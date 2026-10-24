@@ -26,8 +26,12 @@ using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Services;
 using Stride.Assets.Presentation.AssetEditors.GameEditor;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Services;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.Services;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.ViewRegistry;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
 using Stride.Assets.Presentation.AssetEditors.SceneEditor.ViewModels;
 using Stride.Assets.Presentation.SceneEditor;
+using Stride.Assets.Presentation.SceneEditor.Widgets.ViewModels;
 using Stride.Assets.Presentation.View;
 using Stride.Assets.Presentation.ViewModel;
 using Stride.Assets.Presentation.ViewModel.CopyPasteProcessors;
@@ -43,6 +47,9 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
         private static readonly ILogger EditorLogger = GlobalLogger.GetLogger("Scene");
         private EntityHierarchyRootViewModel activeRoot;
         private readonly IDebugPage debugPage;
+        private readonly ISceneEditorViewRegistry sceneViewRegistry;
+        private readonly ISceneEditorInteractionService sceneInteractionService;
+        private readonly string sceneViewId;
         private string filterPattern;
         private List<string> filterTokens;
         private bool compilingAssets;
@@ -55,15 +62,20 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
         protected EntityHierarchyEditorViewModel([NotNull] EntityHierarchyViewModel asset, [NotNull] Func<GameEditorViewModel, IEditorGameController> controllerFactory)
             : base(asset, controllerFactory)
         {
+            sceneInteractionService = new SceneEditorInteractionService();
+            sceneViewRegistry = ServiceProvider.TryGet<ISceneEditorViewRegistry>();
+            sceneViewId = Guid.NewGuid().ToString("N");
+            RegisterSceneView();
             Controller.Loader.AssetLoading += (s, e) => asset.Dispatcher.InvokeAsync(() => CompilingAssets = e.ContentLoadingCount > 0);
             Controller.Loader.AssetLoaded += (s, e) => asset.Dispatcher.InvokeAsync(() => CompilingAssets = e.ContentLoadingCount > 0);
             Camera = new EditorCameraViewModel(ServiceProvider, Controller);
-            Transform = new EntityTransformationViewModel(ServiceProvider, Controller);
+            Transform = new EntityTransformationViewModel(ServiceProvider, Controller, sceneInteractionService);
             Grid = new EditorGridViewModel(ServiceProvider, Controller);
             Navigation = new EditorNavigationViewModel(ServiceProvider, Controller, this);
             Lighting = new EditorLightingViewModel(ServiceProvider, Controller, this);
             Rendering = new EditorRenderingViewModel(ServiceProvider, Controller);
             EntityGizmos = new EntityGizmosViewModel(ServiceProvider, Controller);
+            SceneWidgets = ServiceProvider.TryGet<ISceneWidgetWorkspaceViewModelFactory>()?.Create(this) ?? EmptySceneWidgetWorkspaceViewModel.Instance;
             CreateEntityCommand = new AnonymousTaskCommand<IEntityFactory>(ServiceProvider, x => CreateEntity(true, x, ActiveRoot ?? HierarchyRoot));
             CreateEntityInRootCommand = new AnonymousTaskCommand<IEntityFactory>(ServiceProvider, x => CreateEntity(false, x, ActiveRoot ?? HierarchyRoot));
             CreateFolderInRootCommand = new AnonymousCommand<IEntityFactory>(ServiceProvider, x => CreateFolder(HierarchyRoot.Asset, ActiveRoot ?? HierarchyRoot, true));
@@ -81,11 +93,18 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             UpdateCommands();
             debugPage = new DebugEntityHierarchyEditorUserControl(this);
             EditorDebugTools.RegisterDebugPage(debugPage);
+            if (sceneInteractionService != null)
+            {
+                sceneInteractionService.ActiveInteractionChanged += OnActiveInteractionChanged;
+                UpdateSceneContextMenu();
+            }
 
             DependentProperties.Add(nameof(RootPart), [nameof(HierarchyRoot)]);
         }
 
         public EntityHierarchyRootViewModel ActiveRoot { get => activeRoot; protected internal set => SetValue(ref activeRoot, value); }
+
+        public string SceneViewId => sceneViewId;
 
         public ILogger Logger => EditorLogger;
 
@@ -99,6 +118,22 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
         public string FilterPattern { get => filterPattern; set => SetValue(ref filterPattern, value, UpdateVisibilities); }
 
         public bool CompilingAssets { get => compilingAssets; set => SetValue(ref compilingAssets, value); }
+
+        public bool AreDefaultSceneContextMenuItemsVisible => CustomSceneContextMenuItems.Count == 0 || IsSceneContextMenuExpanded;
+
+        public bool HasCustomSceneContextMenuItems => CustomSceneContextMenuItems.Count > 0;
+
+        public bool IsSceneContextMenuExpanded { get; private set; }
+
+        public string SceneContextMenuTitle { get; private set; } = string.Empty;
+
+        public bool HasSceneContextMenuTitle => !string.IsNullOrWhiteSpace(SceneContextMenuTitle);
+
+        public bool ShowCustomSceneContextMenuSeparator => AreDefaultSceneContextMenuItemsVisible && HasCustomSceneContextMenuItems;
+
+        public bool ShouldOpenSceneContextMenu => AreDefaultSceneContextMenuItemsVisible || HasCustomSceneContextMenuItems;
+
+        public IReadOnlyList<SceneEditorContextMenuItem> CustomSceneContextMenuItems { get; private set; } = Array.Empty<SceneEditorContextMenuItem>();
 
         [NotNull]
         public EditorCameraViewModel Camera { get; }
@@ -120,6 +155,9 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
 
         [NotNull]
         public EntityGizmosViewModel EntityGizmos { get; }
+
+        [NotNull]
+        public ISceneWidgetWorkspaceViewModel SceneWidgets { get; }
 
         public bool MaterialSelectionMode { get => MaterialHighlight.IsActive; set { SetValue(MaterialHighlight.IsActive != value, () => MaterialHighlight.IsActive = value); } }
 
@@ -173,9 +211,15 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             EditorDebugTools.UnregisterDebugPage(debugPage);
 
             Session.ActiveAssetView.SelectedAssets.CollectionChanged -= SelectedAssetsChanged;
+            if (sceneInteractionService != null)
+                sceneInteractionService.ActiveInteractionChanged -= OnActiveInteractionChanged;
+            sceneViewRegistry?.UnregisterView(sceneViewId);
 
             // Unregister editor view models
+            Transform.Destroy();
             Navigation.Destroy();
+            if (SceneWidgets is IDestroyable destroyableSceneWidgets)
+                destroyableSceneWidgets.Destroy();
 
             base.Destroy();
         }
@@ -239,6 +283,68 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             }
         }
 
+        public bool IsCustomToolModeActive()
+        {
+            return sceneInteractionService?.ActiveInteraction != null;
+        }
+        
+        public bool IsCustomToolDefaultSceneInputEnabled(SceneEditorDefaultInput input)
+        {
+            try
+            {
+                return sceneInteractionService?.IsDefaultInputEnabled(input) ?? true;
+            }
+            catch (Exception exception)
+            {
+                EditorLogger.Error($"Custom scene default input check failed for {input}.", exception);
+                return false;
+            }
+        }
+
+        public bool CanCustomToolHandleSceneMouseClick(SceneEditorMouseButton button)
+        {
+            try
+            {
+                return sceneInteractionService?.CanHandleMouseClick(CreateSceneEditorClickContext(button)) ?? false;
+            }
+            catch (Exception exception)
+            {
+                EditorLogger.Error($"Custom scene mouse handler capability check failed for {button}.", exception);
+                return false;
+            }
+        }
+
+        public bool HandleCustomSceneMouseClick(SceneEditorMouseButton button)
+        {
+            try
+            {
+                return sceneInteractionService?.HandleMouseClick(CreateSceneEditorClickContext(button)) ?? false;
+            }
+            catch (Exception exception)
+            {
+                EditorLogger.Error($"Custom scene mouse handler failed for {button}.", exception);
+            }
+
+            return false;
+        }
+
+        public void NotifySceneViewActivated()
+        {
+            sceneViewRegistry?.SetActiveView(sceneViewId);
+        }
+
+        protected void RegisterSceneView(SceneViewModel sceneAsset = null, SceneEditorViewModel sceneEditor = null)
+        {
+            sceneViewRegistry?.RegisterView(new SceneEditorViewRegistration(sceneViewId, sceneInteractionService, sceneAsset, sceneEditor, this));
+        }
+
+        private SceneEditorClickContext CreateSceneEditorClickContext(SceneEditorMouseButton button)
+        {
+            var sceneView = sceneViewRegistry?.Views.FirstOrDefault(x => string.Equals(x.ViewId, sceneViewId, StringComparison.OrdinalIgnoreCase))
+                            ?? new SceneEditorViewRegistration(sceneViewId, sceneInteractionService, Asset as SceneViewModel, this as SceneEditorViewModel, this);
+            return new SceneEditorClickContext(button, sceneView);
+        }
+
         protected virtual void UpdateTransformations(EntityHierarchyElementViewModel element, TransformationTRS transformation)
         {
             var entity = element as EntityViewModel;
@@ -259,6 +365,42 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             var oldScale = (Vector3)node[nameof(TransformComponent.Scale)].Retrieve();
             if (oldScale != transformation.Scale)
                 node[nameof(TransformComponent.Scale)].Update(transformation.Scale);
+        }
+
+        private void OnActiveInteractionChanged(object sender, SceneEditorInteractionChangedEventArgs e)
+        {
+            Transform.SyncActiveTransformationWithCustomTool();
+            UpdateSceneContextMenu();
+        }
+
+        private void UpdateSceneContextMenu()
+        {
+            IReadOnlyList<SceneEditorContextMenuItem> newCustomItems = Array.Empty<SceneEditorContextMenuItem>();
+            var newExpandState = false;
+            var newTitle = string.Empty;
+
+            try
+            {
+                newExpandState = sceneInteractionService?.ShouldExpandDefaultContextMenu() ?? false;
+                newCustomItems = sceneInteractionService?.GetContextMenuItems() ?? Array.Empty<SceneEditorContextMenuItem>();
+                newTitle = sceneInteractionService?.ActiveInteraction?.DisplayName ?? string.Empty;
+            }
+            catch (Exception exception)
+            {
+                EditorLogger.Error("Custom scene context menu provider failed.", exception);
+            }
+
+            CustomSceneContextMenuItems = newCustomItems;
+            IsSceneContextMenuExpanded = newExpandState;
+            SceneContextMenuTitle = newCustomItems.Count > 0 ? newTitle : string.Empty;
+            OnPropertyChanged(nameof(CustomSceneContextMenuItems));
+            OnPropertyChanged(nameof(AreDefaultSceneContextMenuItemsVisible));
+            OnPropertyChanged(nameof(HasCustomSceneContextMenuItems));
+            OnPropertyChanged(nameof(IsSceneContextMenuExpanded));
+            OnPropertyChanged(nameof(SceneContextMenuTitle));
+            OnPropertyChanged(nameof(HasSceneContextMenuTitle));
+            OnPropertyChanged(nameof(ShowCustomSceneContextMenuSeparator));
+            OnPropertyChanged(nameof(ShouldOpenSceneContextMenu));
         }
 
         /// <inheritdoc />
@@ -319,6 +461,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             MaterialSelectionMode = false;
             Navigation.LoadSettings(settings);
             Rendering.LoadSettings(settings);
+            SceneWidgets.LoadSettings(settings);
         }
 
         protected virtual void SaveSettings([NotNull] SceneSettingsData settings)
@@ -332,6 +475,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewMode
             Navigation.SaveSettings(settings);
             Rendering.SaveSettings(settings);
             EntityGizmos.SaveSettings(settings);
+            SceneWidgets.SaveSettings(settings);
         }
 
         /// <inheritdoc />

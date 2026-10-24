@@ -13,6 +13,8 @@ namespace Stride.Core.Presentation.Behaviors
     /// <typeparam name="T">The type the <see cref="ActivateOnCollectionChangedBehavior{T}"/> can be attached to.</typeparam>
     public abstract class ActivateOnCollectionChangedBehavior<T> : Behavior<T> where T : DependencyObject
     {
+        private bool pendingActivation;
+
         /// <summary>
         /// Identifies the <see cref="Collection"/> dependency property.
         /// </summary>
@@ -48,6 +50,23 @@ namespace Stride.Core.Presentation.Behaviors
         /// </summary>
         protected abstract void Activate();
 
+        protected override void OnAttached()
+        {
+            base.OnAttached();
+
+            if (pendingActivation)
+            {
+                pendingActivation = false;
+                Activate();
+            }
+        }
+
+        protected override void OnDetaching()
+        {
+            pendingActivation = false;
+            base.OnDetaching();
+        }
+
         protected virtual bool MatchChange([NotNull] NotifyCollectionChangedEventArgs e)
         {
             return true;
@@ -57,7 +76,14 @@ namespace Stride.Core.Presentation.Behaviors
         {
             if (MatchChange(e))
             {
-                Activate();
+                if (AssociatedObject != null)
+                {
+                    Activate();
+                }
+                else
+                {
+                    pendingActivation = true;
+                }
             }
         }
     }

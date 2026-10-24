@@ -53,6 +53,12 @@ namespace Stride.GameStudio
         [DataMember]
         public IList<AssetId> OpenedAssets { get; set; } = new List<AssetId>();
 
+        /// <summary>
+        /// The list of custom editors that were opened in an editor.
+        /// </summary>
+        [DataMember]
+        public IList<string> OpenedCustomEditors { get; set; } = new List<string>();
+
         [DataMember]
         public int DockingLayoutVersion { get; set; }
 

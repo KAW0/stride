@@ -12,6 +12,7 @@
         xmlns:xcad="https://github.com/Dirkster99/AvalonDock"
         xmlns:sd="http://schemas.stride3d.net/xaml/presentation"
         xmlns:cmd="clr-namespace:Stride.Core.Presentation.Commands;assembly=Stride.Core.Presentation"
+        xmlns:viewBehaviors="clr-namespace:Stride.Assets.Presentation.View.Behaviors;assembly=Stride.Assets.Presentation"
         xmlns:viewModels="clr-namespace:Stride.Core.Presentation.Quantum.ViewModels;assembly=Stride.Core.Presentation.Quantum"
         xmlns:viewModels1="clr-namespace:Stride.Core.Assets.Editor.Components.TemplateDescriptions.ViewModels;assembly=Stride.Core.Assets.Editor"
         mc:Ignorable="d" d:DesignHeight="300" d:DesignWidth="300"
@@ -41,6 +42,48 @@
                      Text="*" TextAlignment="Center"/>
         </DockPanel>
       </DataTemplate>
+
+      <Style x:Key="MainToolbarWidgetListBoxItemContainerStyle" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="{x:Type ListBoxItem}">
+              <Border Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      Padding="{TemplateBinding Padding}"
+                      SnapsToDevicePixels="True">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+              </Border>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+          </Trigger>
+          <Trigger Property="IsSelected" Value="True">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+          </Trigger>
+          <Trigger Property="IsKeyboardFocusWithin" Value="True">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+          </Trigger>
+        </Style.Triggers>
+      </Style>
 
       <!-- TODO: Migrate ImageDictionary from Editor to here -->
       <DrawingImage x:Key="ImageReloadProject">
@@ -73,6 +116,7 @@
         <!-- Asset -->
         <MenuItem Header="{sd:Localize Asset, Context=Menu}" Style="{StaticResource MenuGroupSeparatorStyle}"/>
         <MenuItem Header="{sd:Localize Edit asset..., Context=Menu}" Command="{Binding Session.EditSelectedContentCommand}" Icon="{sd:Image {StaticResource ImageEditAsset}}" InputGestureText="{x:Static strings:KeyGestures.EditAsset}"/>
+        <MenuItem Header="{sd:Localize Open in new view, Context=Menu}" Command="{Binding Session.OpenSelectedContentInNewViewCommand}" Icon="{sd:Image {StaticResource ImageEditAsset}}" Visibility="{Binding Session.OpenSelectedContentInNewViewCommand.IsEnabled, Converter={sd:VisibleOrCollapsed}}"/>
         <MenuItem Header="{Binding Session.SelectionIsRoot, Converter={sd:BoolToParam}, ConverterParameter={sd:Localize Don\'t include in build as root asset, Context=Menu},
                           FallbackValue={sd:Localize Include in build as root asset, Context=Menu}}" Command="{Binding Session.ToggleIsRootOnSelectedAssetCommand}"
                           Icon="{sd:Image {StaticResource ImageAssetIsRoot}}"/>
@@ -262,7 +306,7 @@
         <MenuItem Header="{sd:Localize Show in Explorer, Context=Menu}" Command="{Binding Session.ExploreCommand}" CommandParameter="{Binding Session.ActiveAssetView.SelectedLocations}" Icon="{sd:Image {StaticResource ImageExplore}}" Visibility="{Binding Session.ExploreCommand.IsEnabled, Converter={sd:VisibleOrCollapsed}}"/>
       </MenuItem>
       <!-- View Menu -->
-      <MenuItem Header="{sd:Localize View, Context=Menu}" IsEnabled="{Binding Session, Converter={sd:ObjectToBool}}">
+      <MenuItem x:Name="ViewMenuItem" Header="{sd:Localize View, Context=Menu}" IsEnabled="{Binding Session, Converter={sd:ObjectToBool}}">
         <MenuItem Header="{sd:Localize Solution explorer, Context=Menu}" IsCheckable="True" IsChecked="{Binding Panels.SessionExplorerPanelVisible, Mode=TwoWay}"/>
         <MenuItem Header="{sd:Localize Asset view, Context=Menu}" IsCheckable="True" IsChecked="{Binding Panels.AssetViewPanelVisible, Mode=TwoWay}"/>
         <MenuItem Header="{sd:Localize References, Context=Menu}" IsCheckable="True" IsChecked="{Binding Panels.ReferencesPanelVisible, Mode=TwoWay}"/>
@@ -422,6 +466,47 @@
                   ToolTip="{sd:ToolTip {sd:Localize Cancel the current build, Context=ToolTip}, {x:Static strings:KeyGestures.CancelBuild}}" sd:ToolTipHelper.Status="{Binding Status}" ToolTipService.ShowOnDisabled="True">
             <Image Source="{StaticResource ImageStopBuild}"/>
           </Button>
+        </ToolBar>
+        <ToolBar HorizontalAlignment="Stretch">
+          <ListBox DataContext="{Binding MainToolbar.Workspace}"
+                   ItemsSource="{Binding Items}"
+                   Tag="{Binding Collection}"
+                   ItemContainerStyle="{StaticResource MainToolbarWidgetListBoxItemContainerStyle}"
+                   BorderThickness="0"
+                   Background="Transparent"
+                   HorizontalContentAlignment="Stretch"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Orientation="Horizontal">
+                  <Border Tag="SceneWidgetDragHandle" Width="8" Cursor="SizeAll">
+                    <TextBlock Text="⋮" VerticalAlignment="Center" />
+                  </Border>
+                  <ContentControl Content="{Binding View}"
+                                  Visibility="{Binding IsVisible, Converter={sd:VisibleOrCollapsed}}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+            <ListBox.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Select profile..." Command="{Binding PlacementTarget.DataContext.SelectProfileWithPromptCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                <MenuItem Header="Create local profile" Command="{Binding PlacementTarget.DataContext.CreateLocalProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                <MenuItem Header="Create project profile" Command="{Binding PlacementTarget.DataContext.CreateProjectProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                <Separator />
+                <MenuItem Header="Save selected profile" Command="{Binding PlacementTarget.DataContext.SaveSelectedProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                <MenuItem Header="Rename selected profile" Command="{Binding PlacementTarget.DataContext.RenameSelectedProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                <MenuItem Header="Set selected profile as default" Command="{Binding PlacementTarget.DataContext.SetSelectedProfileAsDefaultCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+            <i:Interaction.Behaviors>
+              <viewBehaviors:HorizontalSceneWidgetListBoxDragDropBehavior CanDrag="True" CanDrop="True" CanInsert="True" />
+            </i:Interaction.Behaviors>
+          </ListBox>
         </ToolBar>
       </ToolBarTray>
 

@@ -13,6 +13,7 @@ using Stride.Assets.Presentation.AssetEditors.GameEditor.Game;
 using Stride.Engine;
 using Stride.Engine.Processors;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels;
+using Stride.Assets.Presentation.SceneEditor.Widgets;
 
 namespace Stride.Assets.Presentation.SceneEditor
 {
@@ -67,6 +68,10 @@ namespace Stride.Assets.Presentation.SceneEditor
         /// </remarks>
         public bool SceneLoaded = false;
 
+        // Scene widgets
+        public List<SceneWidgetLayoutEntry> CurrentWidgetLayout = [];
+        public SceneWidgetProfileReference SelectedWidgetProfile = SceneWidgetProfileReference.None();
+
         /// <summary>
         /// Creates a new instance of the default scene settings.
         /// </summary>
@@ -90,5 +95,11 @@ namespace Stride.Assets.Presentation.SceneEditor
     {
         public static SettingsKey<Dictionary<AssetId, SceneSettingsData>> SceneSettings = new SettingsKey<Dictionary<AssetId, SceneSettingsData>>("Package/SceneSettings",
             PackageUserSettings.SettingsContainer, () => new Dictionary<AssetId, SceneSettingsData>());
+
+        public static SettingsKey<List<SceneWidgetProfileData>> LocalWidgetProfiles = new SettingsKey<List<SceneWidgetProfileData>>("Package/SceneWidgetProfiles/LocalProfiles",
+            PackageUserSettings.SettingsContainer, () => new List<SceneWidgetProfileData>());
+
+        public static SettingsKey<SceneWidgetProfileReference> DefaultWidgetProfile = new SettingsKey<SceneWidgetProfileReference>("Package/SceneWidgetProfiles/DefaultProfile",
+            PackageUserSettings.SettingsContainer, SceneWidgetProfileReference.None);
     }
 }

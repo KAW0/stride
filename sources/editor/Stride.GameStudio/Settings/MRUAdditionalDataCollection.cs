@@ -162,6 +162,20 @@ namespace Stride.GameStudio
             SaveToSettings();
         }
 
+        public void UpdateOpenedCustomEditors(UFile filePath, IEnumerable<string> openedCustomEditors)
+        {
+            // Ensure we are properly synchronized with the file.
+            LoadFromSettings();
+
+            var data = GetOrCreateDataPrivate(filePath);
+            data.OpenedCustomEditors.Clear();
+            data.OpenedCustomEditors.AddRange(openedCustomEditors.Where(x => !string.IsNullOrWhiteSpace(x)));
+            UpdateDataPrivate(data);
+
+            // Save immediately
+            SaveToSettings();
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private MRUAdditionalData GetOrCreateDataPrivate(UFile filePath, bool createIfNotExist = true)
         {

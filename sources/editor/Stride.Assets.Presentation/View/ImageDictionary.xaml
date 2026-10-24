@@ -400,6 +400,16 @@
     </DrawingImage.Drawing>
   </DrawingImage>
 
+  <DrawingImage x:Key="{x:Static gameEditor:Transformation.CustomTool}">
+    <DrawingImage.Drawing>
+      <DrawingGroup>
+        <GeometryDrawing Brush="#00FFFFFF" Geometry="F1M0,0L16,0 16,16 0,16z" />
+        <GeometryDrawing Brush="#FFF6F6F6" Geometry="F1M10.34,2.02L10.36,2.06L10.28,2.16L10.34,2.32L10.28,2.36L10.28,3.8L10.22,3.8L10.04,4.02L9.86,4.44L9.88,5.62L9.96,6L10.12,6.28L10.32,6.46L10.6,6.58L11.48,6.62L11.78,6.58L12.42,6.34L12.62,6.18L12.68,6L13.8,5.98L13.98,6.02L14,6.08L13.9,6.18L13.74,6.24L12,7.84L10.52,7.74L10.18,7.94L3.64,13.28L1.76,10.96L8.14,5.78L8.26,5.62L8.3,5.48L8.36,3.82L9.88,2.46L10.2,2.1Z" />
+      </DrawingGroup>
+    </DrawingImage.Drawing>
+  </DrawingImage>
+
+
   <DrawingImage x:Key="{x:Static data:ConfigPlatforms.Android}">
     <DrawingImage.Drawing>
       <DrawingGroup>

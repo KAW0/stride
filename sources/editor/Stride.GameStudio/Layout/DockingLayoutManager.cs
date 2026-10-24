@@ -33,7 +33,7 @@ namespace Stride.GameStudio.Layout
         private readonly SessionViewModel session;
         private bool isInEditorLayout;
 
-        private struct BindingInfo
+        private readonly struct BindingInfo
         {
             public readonly Binding Binding;
             public readonly DependencyProperty Property;
@@ -44,8 +44,11 @@ namespace Stride.GameStudio.Layout
                 Property = property;
             }
 
-            public static BindingInfo FromBindingExpression(BindingExpression bindingExpression)
+            public static BindingInfo? FromBindingExpression(BindingExpression bindingExpression)
             {
+                if (bindingExpression == null)
+                    return null;
+
                 return new BindingInfo(bindingExpression.ParentBinding.CloneBinding(), bindingExpression.TargetProperty);
             }
         }
@@ -98,6 +101,17 @@ namespace Stride.GameStudio.Layout
         {
             var mruData = mruDataCollection.GetData(session.SessionFilePath);
             return mruData != null ? mruData.OpenedAssets : Enumerable.Empty<AssetId>();
+        }
+
+        public void SaveOpenCustomEditors(IEnumerable<string> openCustomEditors)
+        {
+            mruDataCollection.UpdateOpenedCustomEditors(session.SessionFilePath, openCustomEditors ?? Enumerable.Empty<string>());
+        }
+
+        public IEnumerable<string> LoadOpenCustomEditors()
+        {
+            var mruData = mruDataCollection.GetData(session.SessionFilePath);
+            return mruData != null ? mruData.OpenedCustomEditors : Enumerable.Empty<string>();
         }
 
         /// <summary>
@@ -197,7 +211,7 @@ namespace Stride.GameStudio.Layout
             {
                 var titleBindingInfo = BindingInfo.FromBindingExpression(BindingOperations.GetBindingExpression(anchorable, LayoutContent.TitleProperty));
                 var isVisibleBindingInfo = BindingInfo.FromBindingExpression(BindingOperations.GetBindingExpression(anchorable, AvalonDockHelper.IsVisibleProperty));
-                bindings.Add(anchorable.ContentId, new List<BindingInfo> { titleBindingInfo, isVisibleBindingInfo });
+                bindings.Add(anchorable.ContentId, new[] { titleBindingInfo, isVisibleBindingInfo }.Where(x => x.HasValue).Select(x => x.Value).ToList());
 
                 // Save behaviors, although complex bindings (eg. nested bindings) will not be restored properly...
                 var behaviorCollection = Interaction.GetBehaviors(anchorable);

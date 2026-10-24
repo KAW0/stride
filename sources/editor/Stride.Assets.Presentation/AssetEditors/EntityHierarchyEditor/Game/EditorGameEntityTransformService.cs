@@ -121,6 +121,9 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                     case Transformation.Scale:
                         nextGizmo = ScaleGizmo;
                         break;
+                    case Transformation.CustomTool:
+                        nextGizmo = null;
+                        break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(value));
                 }
@@ -246,9 +249,15 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                         // Toggle between different snapping methods
                         if (game.Input.IsKeyPressed(SceneEditorSettings.SwitchGizmo.GetValue()))
                         {
-                            var current = activeTransformation;
-                            var next = (int)(current + 1) % Enum.GetValues<Transformation>().Length;
-                            await editor.Dispatcher.InvokeAsync(() => editor.Transform.ActiveTransformation = (Transformation)next);
+                            var next = activeTransformation switch
+                            {
+                                Transformation.Translation => Transformation.Rotation,
+                                Transformation.Rotation => Transformation.Scale,
+                                Transformation.Scale => Transformation.Translation,
+                                Transformation.CustomTool => Transformation.Translation,
+                                _ => throw new ArgumentOutOfRangeException(),
+                            };
+                            await editor.Dispatcher.InvokeAsync(() => editor.Transform.ActiveTransformation = next);
                         }
                     }
 
@@ -285,6 +294,12 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
 
         private void DynamicSnapSelectionToGrid(bool useDynamicSnapping)
         {
+            if (activeTransformationGizmo == null)
+            {
+                dynamicSnappingInUse = false;
+                return;
+            }
+
             if (!useDynamicSnapping && dynamicSnappingInUse)
             {
                 activeTransformationGizmo.UseSnap = false;
@@ -356,6 +371,8 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game
                     case Transformation.Scale:
                         ScaleGizmo.SnapValue = value;
                         ScaleGizmo.UseSnap = isActive;
+                        break;
+                    case Transformation.CustomTool:
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(transformation));

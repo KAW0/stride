@@ -248,23 +248,26 @@ namespace Stride.Core.Assets.Editor.View.Behaviors
             if (data == null)
                 return DragDropEffects.None;
 
-            DragWindow = new DragWindow
+            if (DragVisualTemplate != null)
             {
-                Content = new ContentControl { Content = data, ContentTemplate = DragVisualTemplate }
-            };
+                DragWindow = new DragWindow
+                {
+                    Content = new ContentControl { Content = data, ContentTemplate = DragVisualTemplate }
+                };
 
-            // Set initial position to the cursor location to avoid the element potentially flashing at the system-default window position.
-            var rootSource = PresentationSource.FromVisual(AssociatedObject);
-            if (rootSource != null)
-            {
-                var cursorRelToSource = AssociatedObject.GetCursorRelativePosition();
-                var cursorScreenPhysical = AssociatedObject.PointToScreen(cursorRelToSource);
-                var cursorInDip = rootSource.CompositionTarget.TransformFromDevice.Transform(cursorScreenPhysical);
-                DragWindow.Left = cursorInDip.X + 16;
-                DragWindow.Top = cursorInDip.Y;
+                // Set initial position to the cursor location to avoid the element potentially flashing at the system-default window position.
+                var rootSource = PresentationSource.FromVisual(AssociatedObject);
+                if (rootSource != null)
+                {
+                    var cursorRelToSource = AssociatedObject.GetCursorRelativePosition();
+                    var cursorScreenPhysical = AssociatedObject.PointToScreen(cursorRelToSource);
+                    var cursorInDip = rootSource.CompositionTarget.TransformFromDevice.Transform(cursorScreenPhysical);
+                    DragWindow.Left = cursorInDip.X + 16;
+                    DragWindow.Top = cursorInDip.Y;
+                }
+
+                DragWindow.Show();
             }
-
-            DragWindow.Show();
 
             try
             {

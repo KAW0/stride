@@ -20,6 +20,7 @@ using Stride.Assets.Presentation.ViewModel;
 using Stride.Core.CodeEditorSupport;
 using Stride.GameStudio.Services;
 using Stride.GameStudio.Helpers;
+using Stride.Editor.CustomEditors.Services;
 using Stride.Core.Presentation.ViewModels;
 
 namespace Stride.GameStudio.ViewModels
@@ -42,6 +43,8 @@ namespace Stride.GameStudio.ViewModels
         }
 
         public static GameStudioViewModel GameStudio => (GameStudioViewModel)Instance;
+
+        public IMainToolbarService MainToolbar => ServiceProvider.Get<IMainToolbarService>();
 
         [NotNull]
         public EditionPanelViewModel Panels { get; }

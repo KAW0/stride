@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Dataflow;
@@ -36,6 +37,8 @@ namespace Stride.Assets.Presentation.AssetEditors
         Source,
         /// <summary>The project's editor loadability (StrideContainsAssetTypes) flipped: load or unload its assembly.</summary>
         Loadability,
+        /// <summary>A XAML file changed and the view must be rebuilt.</summary>
+        Rebuild,
     }
 
     public class AssemblyChangedEvent
@@ -329,34 +332,84 @@ namespace Stride.Assets.Presentation.AssetEditors
                     return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.Project, trackedAssembly.Project.FilePath, trackedAssembly.Project);
                 }
 
-                var directoryName = Path.GetDirectoryName(trackedAssembly.Project.FilePath) + Path.DirectorySeparatorChar;
-                var changedFileDirectoryName = Path.GetDirectoryName(changedFile) + Path.DirectorySeparatorChar;
+                var directoryName = EnsureTrailingDirectorySeparator(Path.GetFullPath(Path.GetDirectoryName(trackedAssembly.Project.FilePath)!));
+                var changedFileDirectoryName = EnsureTrailingDirectorySeparator(Path.GetFullPath(Path.GetDirectoryName(changedFile)!));
+                var isInProjectDirectory = changedFileDirectoryName.StartsWith(directoryName, StringComparison.OrdinalIgnoreCase);
+                var needProjectReload = string.Equals(trackedAssembly.Project.FilePath, changedFile, StringComparison.OrdinalIgnoreCase);
 
-                // Only handle .cs files under this project's directory (DefaultItems auto import *.cs).
+                var extension = Path.GetExtension(changedFile)?.ToLowerInvariant();
+                var isInBuildArtifactDirectory = IsBuildArtifactPath(directoryName, changedFile);
+                // Also check for .cs and .xaml file changes (DefaultItems auto import *.cs, with some excludes such as obj subfolder)
+
                 // TODO: Check actual unevaluated .csproj to get the auto includes/excludes?
-                if (Path.GetExtension(changedFile)?.ToLowerInvariant() != ".cs"
-                    || !changedFileDirectoryName.StartsWith(directoryName, StringComparison.OrdinalIgnoreCase))
+                if (needProjectReload == false
+                    && ((e.ChangeType == FileEventChangeType.Deleted || e.ChangeType == FileEventChangeType.Renamed || e.ChangeType == FileEventChangeType.Created)
+                    && (extension == ".cs" || extension == ".xaml")
+                    && isInProjectDirectory
+                    && !isInBuildArtifactDirectory))
+                {
+                    needProjectReload = true;
+                }
+
+                var needAssemblyRebuild = needProjectReload == false
+                    && e.ChangeType == FileEventChangeType.Changed
+                    && extension == ".xaml"
+                    && isInProjectDirectory
+                    && !isInBuildArtifactDirectory;
+
+                // Reparse the project file and report source changes
+                if (needProjectReload)
+                {
+                    // Reparse the project file and report source changes
+                    await UpdateProject(trackedAssembly);
+                    return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.Project, trackedAssembly.Project.FilePath, trackedAssembly.Project);
+                }
+
+                if (needAssemblyRebuild)
+                    return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.Rebuild, changedFile, trackedAssembly.Project);
+
+                // Only deal with file changes
+                if (e.ChangeType != FileEventChangeType.Changed)
                     continue;
 
-                switch (e.ChangeType)
-                {
-                    // File membership changed: reconcile the asset tree (no MSBuild/workspace reload).
-                    case FileEventChangeType.Created:
-                    case FileEventChangeType.Deleted:
-                    case FileEventChangeType.Renamed:
-                        return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.ProjectAssets, e.FullPath, trackedAssembly.Project)
-                        {
-                            SourceChangeType = e.ChangeType,
-                            OldChangedFile = renameEvent?.OldFullPath,
-                        };
+                if (isInBuildArtifactDirectory)
+                    continue;
 
-                    // Content changed: reload just this document's text.
-                    case FileEventChangeType.Changed:
-                        return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.Source, changedFile, trackedAssembly.Project)
+                // Check if we have a matching document
+                var document = trackedAssembly.Project.Documents.FirstOrDefault(x => string.Equals(x.FilePath, changedFile, StringComparison.OrdinalIgnoreCase));
+                if (document == null)
+                    continue;
+
+                string source = null;
+                // Try multiple times
+                for (int i = 0; i < 6; ++i)
+                {
+                    try
+                    {
+                        using (var streamReader = new StreamReader(File.Open(changedFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), Encoding.UTF8, true))
                         {
-                            SourceChangeType = FileEventChangeType.Changed,
-                        };
+                            source = await streamReader.ReadToEndAsync();
+                        }
+                        break;
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    await Task.Delay(TimeSpan.FromMilliseconds(2 << i), batchChangesCancellationTokenSource.Token);
                 }
+
+                if (source == null)
+                {
+                    // Something went wrong reading the file
+                    return null;
+                }
+
+                // Preserve the DocumentId and Roslyn state while replacing its text.
+                trackedAssembly.Project = trackedAssembly.Project.Solution
+                    .WithDocumentText(document.Id, SourceText.From(source, Encoding.UTF8))
+                    .GetProject(trackedAssembly.Project.Id);
+
+                return new AssemblyChangedEvent(trackedAssembly.LoadedAssembly, AssemblyChangeType.Source, changedFile, trackedAssembly.Project);
             }
 
             return null;
@@ -519,6 +572,15 @@ namespace Stride.Assets.Presentation.AssetEditors
 
                 directoryWatcher.Track(document.FilePath);
             }
+
+            foreach (var xamlFile in Directory.EnumerateFiles(projectDirectory.ToOSPath(), "*.xaml", SearchOption.AllDirectories))
+            {
+                if (IsBuildArtifactPath(projectDirectory.ToOSPath(), xamlFile))
+                    continue;
+
+                directoryWatcher.Track(xamlFile);
+            }
+
         }
 
         private async Task<Project> OpenProject(UFile projectPath, bool forceReload = false)
@@ -582,6 +644,26 @@ namespace Stride.Assets.Presentation.AssetEditors
         private void directoryWatcher_Modified(object sender, FileEvent e)
         {
             fileChanged.Post(e);
+        }
+
+        private static string EnsureTrailingDirectorySeparator(string path)
+        {
+            return path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar)
+                ? path
+                : path + Path.DirectorySeparatorChar;
+        }
+
+        private static bool IsBuildArtifactPath(string projectDirectory, string path)
+        {
+            var root = EnsureTrailingDirectorySeparator(Path.GetFullPath(projectDirectory));
+            var fullPath = Path.GetFullPath(path);
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var relativePath = Path.GetRelativePath(root, fullPath);
+            return relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Any(segment => string.Equals(segment, "bin", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(segment, "obj", StringComparison.OrdinalIgnoreCase));
         }
 
         public class TrackedAssembly

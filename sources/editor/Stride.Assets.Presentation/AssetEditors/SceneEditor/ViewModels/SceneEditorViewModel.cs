@@ -15,6 +15,7 @@ using Stride.Assets.Presentation.AssetEditors.GameEditor;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.Services;
 using Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels;
 using Stride.Assets.Presentation.AssetEditors.SceneEditor.Services;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
 using Stride.Assets.Presentation.SceneEditor;
 using Stride.Assets.Presentation.ViewModel;
 using Stride.Core.Assets.Editor.Annotations;
@@ -53,6 +54,7 @@ namespace Stride.Assets.Presentation.AssetEditors.SceneEditor.ViewModels
             : base(asset, controllerFactory)
         {
             mainScene = asset;
+            RegisterSceneView(asset, this);
         }
 
         public override SceneViewModel Asset => (SceneViewModel)base.Asset;

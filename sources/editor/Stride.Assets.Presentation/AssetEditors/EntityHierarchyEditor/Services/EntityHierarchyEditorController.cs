@@ -61,6 +61,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Services
             services.Add(new EditorGameSpaceMarkerService());
             services.Add(new EditorGameCameraOrientationService());
             services.Add(new EditorGameComponentGizmoService(this));
+            services.Add(new EditorGameCustomToolSceneInputService(Editor));
             services.Add(new EditorGameEntitySelectionService(Editor));
             services.Add(new EditorGameEntityTransformService(Editor, this));
             services.Add(new EditorGameModelSelectionService(Editor));

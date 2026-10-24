@@ -81,6 +81,8 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
     <ProjectReference Include="..\Stride.Assets.Presentation\Stride.Assets.Presentation.csproj" />
+    <ProjectReference Include="..\Stride.Editor.CustomEditors.Wpf\Stride.Editor.CustomEditors.Wpf.csproj" />
+    <ProjectReference Include="..\Stride.Editor.CustomEditors\Stride.Editor.CustomEditors.csproj" />
     <ProjectReference Include="..\..\tools\Stride.EffectCompilerServer\Stride.EffectCompilerServer.csproj" IncludeAssets="Build" />
     <ProjectReference Include="..\Stride.Editor.CrashReport\Stride.Editor.CrashReport.csproj" />
     <!-- NuGet dependencies (and build-ordering triggers) on the three template packages, so a Stride

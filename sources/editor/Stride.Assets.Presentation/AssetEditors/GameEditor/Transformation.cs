@@ -27,5 +27,11 @@ namespace Stride.Assets.Presentation.AssetEditors.GameEditor
         /// </summary>
         [Translation("Use scale gizmo")]
         Scale,
+
+        /// <summary>
+        /// Custom Tool
+        /// </summary>
+        [Translation("Custom Tool")]
+        CustomTool,
     }
 }

@@ -13,6 +13,8 @@ namespace Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels
 {
     public class ContentReferenceCollector : AssetGraphVisitorBase
     {
+        private readonly string gameSideContentKey;
+
         public struct ContentReferenceAccessor
         {
             public readonly AssetId ContentId;
@@ -27,9 +29,10 @@ namespace Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels
             }
         }
 
-        public ContentReferenceCollector([NotNull] AssetPropertyGraphDefinition propertyGraphDefinition)
+        public ContentReferenceCollector([NotNull] AssetPropertyGraphDefinition propertyGraphDefinition, [NotNull] string gameSideContentKey)
             : base(propertyGraphDefinition)
         {
+            this.gameSideContentKey = gameSideContentKey;
         }
 
         public bool Registering { get; set; } = true;
@@ -60,7 +63,7 @@ namespace Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels
             else if (AssetRegistry.CanBeAssignedToContentTypes(node.Descriptor.GetInnerCollectionType(), checkIsUrlType: false))
             {
                 // We have an index, and our collection is directly a collection of content type. Let's just collect the corresponding item.
-                var gameContent = node.GetContent("Game");
+                var gameContent = node.GetContent(gameSideContentKey);
                 var id = AttachedReferenceManager.GetAttachedReference(node.Retrieve(index))?.Id ?? AssetId.Empty;
                 CollectContentReference(id, gameContent, index);
             }
@@ -69,8 +72,7 @@ namespace Stride.Assets.Presentation.AssetEditors.GameEditor.ViewModels
         protected override void VisitNode(IGraphNode node)
         {
             var assetNode = (IAssetNode)node;
-            // TODO: share the proper const
-            var gameContent = assetNode.GetContent("Game");
+            var gameContent = assetNode.GetContent(gameSideContentKey);
             if (gameContent != null)
             {
                 if (node is IMemberNode memberContent)

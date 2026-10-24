@@ -33,6 +33,7 @@ using Stride.GameStudio.Services;
 using Stride.GameStudio.Remote;
 using Stride.Core.Presentation.ViewModels;
 using Stride.Assets.Presentation.ViewModel;
+using Stride.Editor.CustomEditors.Events;
 
 namespace Stride.GameStudio.ViewModels
 {
@@ -397,6 +398,7 @@ namespace Stride.GameStudio.ViewModels
                 }
                 // Make sure we refresh the property grid so we don't reference any old type
                 Session.AssetViewProperties.RefreshSelectedPropertiesAsync().Forget();
+                CustomEditorEvents.RaiseAssembliesReloaded(assembliesToReload.Select(x => x.LoadedAssembly).ToArray());
             }
             else if (loadabilityChanged)
             {
@@ -731,7 +733,6 @@ namespace Stride.GameStudio.ViewModels
                     ["SolutionPlatform"] = "Any CPU",
                     ["StrideBuildEngineLogVerbose"] = "true",
                 };
-
                 currentBuild = VSProjectHelper.CompileProjectAssemblyAsync(projectPath, logger, target, configuration, platformName, extraProperties, BuildRequestDataFlags.ProvideProjectStateAfterBuild);
                 if (currentBuild == null)
                 {

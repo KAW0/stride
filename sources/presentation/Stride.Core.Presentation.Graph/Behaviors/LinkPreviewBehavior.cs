@@ -124,9 +124,12 @@ namespace Stride.Core.Presentation.Graph.Behaviors
             // Destroy it!
             if (LinkPreview != null)
             {
-                adornLayer.Remove(LinkPreview);
+                if (ReferenceEquals(LinkPreview.AdornedElement, graph_area_))
+                {
+                    (adornLayer ?? AdornerLayer.GetAdornerLayer(graph_area_))?.Remove(LinkPreview);
+                    LinkPreview = null;
+                }
                 adornLayer = null;
-                LinkPreview = null;
             }
         }
         #endregion

@@ -31,6 +31,7 @@ namespace Stride.Core.Presentation.Controls
         private Int4 lastBoundingBox;
         private bool attached;
         private bool isDisposed;
+        private IntPtr attachedParentHandle;
 
         static GameEngineHost()
         {
@@ -111,15 +112,15 @@ namespace Stride.Core.Presentation.Controls
 
         private void Attach()
         {
-            if (attached)
-                return;
-
             var hwndSource = GetHwndSource();
             if (hwndSource == null)
                 return;
                 
             var hwndParent = hwndSource.Handle;
             if (hwndParent == IntPtr.Zero)
+                return;
+
+            if (attached && attachedParentHandle == hwndParent)
                 return;
 
             // Get current DPI
@@ -137,7 +138,13 @@ namespace Stride.Core.Presentation.Controls
             NativeHelper.SetParent(Handle, hwndParent);
 
             // Register keyboard sink to make shortcuts work
-            ((IKeyboardInputSink)this).KeyboardInputSite = ((IKeyboardInputSink)hwndSource).RegisterKeyboardInputSink(this);
+            if (((IKeyboardInputSink)this).KeyboardInputSite == null || attachedParentHandle != hwndParent)
+            {
+                ((IKeyboardInputSink)this).KeyboardInputSite?.Unregister();
+                ((IKeyboardInputSink)this).KeyboardInputSite = ((IKeyboardInputSink)hwndSource).RegisterKeyboardInputSink(this);
+            }
+
+            attachedParentHandle = hwndParent;
             attached = true;
         }
 
@@ -156,6 +163,7 @@ namespace Stride.Core.Presentation.Controls
 
             // Make sure we will actually attach next time Attach() is called
             lastBoundingBox = Int4.Zero;
+            attachedParentHandle = IntPtr.Zero;
             attached = false;
         }
 
@@ -169,6 +177,8 @@ namespace Stride.Core.Presentation.Controls
             Dispatcher.InvokeAsync(() =>
             {
                 updateRequested = false;
+                Attach();
+
                 Visual root = null;
                 var shouldShow = true;
                 var parent = (Visual)VisualTreeHelper.GetParent(this);

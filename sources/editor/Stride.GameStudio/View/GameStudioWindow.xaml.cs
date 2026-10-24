@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Stride.Core.Assets;
@@ -18,6 +19,7 @@ using Stride.Core.Assets.Editor.View.DebugTools;
 using Stride.Core.Assets.Editor.ViewModel;
 using Stride.Core;
 using Stride.Core.Extensions;
+using Stride.Core.Diagnostics;
 using Stride.Core.Serialization;
 using Stride.Core.Presentation.Commands;
 using Stride.Core.Presentation.Extensions;
@@ -26,10 +28,22 @@ using Stride.Core.Presentation.Services;
 using Stride.Core.Presentation.Windows;
 using Stride.Core.Translation;
 using AvalonDock.Layout;
-using Stride.GameStudio.ViewModels;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.Services;
+using Stride.Core.Annotations;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.ViewRegistry;
+using Stride.Assets.Presentation.SceneEditor.Widgets.ViewModels;
+using Stride.Editor.CustomEditors.Infrastructure;
+using Stride.Editor.CustomEditors.Models;
+using Stride.Editor.CustomEditors.SceneWidgets;
+using Stride.Editor.CustomEditors.SceneWidgets.ViewModels;
+using Stride.Editor.CustomEditors.Services;
+using Stride.Editor.CustomEditors.Wpf;
 using Stride.GameStudio.Helpers;
 using Stride.GameStudio.AssetsEditors;
 using Stride.GameStudio.Layout;
+using Stride.GameStudio.Services;
+using Stride.GameStudio.ViewModels;
 
 #if DEBUG
 using Stride.Assets.Presentation.Test;
@@ -42,10 +56,14 @@ namespace Stride.GameStudio.View
     /// </summary>
     public partial class GameStudioWindow : IAsyncClosableWindow
     {
+        private static readonly Logger Logger = GlobalLogger.GetLogger(nameof(GameStudioWindow));
         private DebugWindow debugWindow;
         private bool forceClose;
         private readonly DockingLayoutManager dockingLayout;
         private readonly AssetEditorsManager assetEditorsManager;
+        private readonly ICustomEditorsService customEditorsService;
+        private readonly AvalonDockExceptionFilter avalonDockExceptionFilter;
+        private readonly Dictionary<string, MenuItem> customEditorMenuItems = new(StringComparer.OrdinalIgnoreCase);
         private TaskCompletionSource<bool> closingTask;
 
 #if DEBUG
@@ -63,7 +81,18 @@ namespace Stride.GameStudio.View
             dockingLayout = new DockingLayoutManager(this, editor.Session);
             assetEditorsManager = new AssetEditorsManager(dockingLayout, editor.Session);
             editor.ServiceProvider.RegisterService(assetEditorsManager);
-
+            var sceneEditorViewRegistry = new SceneEditorViewRegistry();
+            editor.ServiceProvider.RegisterService(sceneEditorViewRegistry);
+            var customToolService1 = new CustomToolService(sceneEditorViewRegistry);
+            editor.ServiceProvider.RegisterService(customToolService1);
+            var sceneWidgetServiceViewBridge = new SceneWidgetServiceViewBridgeWpf();
+            editor.ServiceProvider.RegisterService(sceneWidgetServiceViewBridge);
+            editor.ServiceProvider.RegisterService(new SceneWidgetService(sceneWidgetServiceViewBridge));
+            editor.ServiceProvider.RegisterService(new MainToolbarWidgetService(sceneWidgetServiceViewBridge, editor.ServiceProvider));
+            editor.ServiceProvider.RegisterService(new SceneWidgetWorkspaceViewModelFactory(editor.ServiceProvider));
+            customEditorsService = new CustomEditorsService(new CustomEditorServiceViewBridgeWpf(() => Dispatcher.CheckAccess(), action => Dispatcher.Invoke(action), GetOrCreateCustomEditorDockHandle, IsCustomEditorDockHandleAttached, CloseCustomEditorDockHandle), editor.ServiceProvider);
+            editor.ServiceProvider.RegisterService(customEditorsService);
+            avalonDockExceptionFilter = new AvalonDockExceptionFilter(Dispatcher);
             OpenDebugWindowCommand = new AnonymousCommand(editor.ServiceProvider, OpenDebugWindow);
             CreateTestAssetCommand = new AnonymousCommand(editor.ServiceProvider, CreateTestAsset);
             CreateUnitTestAssetCommand = new AnonymousCommand(editor.ServiceProvider, CreateUnitTestAsset);
@@ -71,6 +100,7 @@ namespace Stride.GameStudio.View
             EditorSettings.ResetEditorLayout.Command = new AnonymousTaskCommand(editor.ServiceProvider, ResetAllLayouts);
 
             InitializeComponent();
+            InitializeCustomEditorsMenu();
             Application.Current.Activated += (s, e) => editor.ServiceProvider.Get<IEditorDialogService>().ShowDelayedNotifications();
             Loaded += GameStudioLoaded;
 
@@ -80,7 +110,8 @@ namespace Stride.GameStudio.View
         private async Task ResetAllLayouts()
         {
             var assets = assetEditorsManager.OpenedAssets.Select(x => x.Id).ToList();
-            if (assets.Count > 0)
+            var customEditors = customEditorsService.OpenInstances.ToList();
+            if (assets.Count > 0 || customEditors.Count > 0)
             {
                 var message = Tr._p("Message", "To reset the layout, Game Studio needs to close and re-open all asset and document editors. You won't lose unsaved changes.");
                 var buttons = DialogHelper.CreateButtons(new[] { "Reset layout", "Cancel" }, 1, 2);
@@ -91,9 +122,13 @@ namespace Stride.GameStudio.View
 
             // Close all editors
             assetEditorsManager.CloseAllEditorWindows(null);
+            foreach (var customEditor in customEditors)
+            {
+                await customEditorsService.CloseAsync(customEditor.EditorId, customEditor.InstanceId);
+            }
 
             // Check if user cancelled closing some of the editors.
-            if (assetEditorsManager.OpenedAssets.Any())
+            if (assetEditorsManager.OpenedAssets.Any() || customEditors.Any(x => customEditorsService.IsEditorVisible(x.EditorId, x.InstanceId)))
                 return;
 
             // Safely reset layout
@@ -101,6 +136,10 @@ namespace Stride.GameStudio.View
 
             // Reopen editors
             await ReopenAssetEditors(assets);
+            foreach (var customEditor in customEditors)
+            {
+                await TryShowCustomEditor(customEditor.EditorId, "layout reset", customEditor.InstanceId);
+            }
         }
 
         private static void OpenMetricsProjectSession(EditorViewModel editor)
@@ -138,6 +177,12 @@ namespace Stride.GameStudio.View
             base.OnClosed(e);
 
             CloseMetricsProjectSession();
+            customEditorsService.EditorDescriptorAdded -= OnCustomEditorAdded;
+            customEditorsService.EditorDescriptorUpdated -= OnCustomEditorUpdated;
+            customEditorsService.EditorDescriptorRemoved -= OnCustomEditorRemoved;
+            customEditorsService.EditorVisibilityChanged -= OnCustomEditorVisibilityChanged;
+            avalonDockExceptionFilter.Dispose();
+            (customEditorsService as IDisposable)?.Dispose();
         }
 
         private static void CloseMetricsProjectSession()
@@ -160,6 +205,138 @@ namespace Stride.GameStudio.View
         public ICommandBase BreakDebuggerCommand { get; }
 
         public bool IsTestMenuVisible => TestMenuVisible;
+
+        private void InitializeCustomEditorsMenu()
+        {
+            customEditorsService.EditorDescriptorAdded += OnCustomEditorAdded;
+            customEditorsService.EditorDescriptorUpdated += OnCustomEditorUpdated;
+            customEditorsService.EditorDescriptorRemoved += OnCustomEditorRemoved;
+            customEditorsService.EditorVisibilityChanged += OnCustomEditorVisibilityChanged;
+
+            foreach (var editorEntry in customEditorsService.AvailableEditorTypes)
+            {
+                AddCustomEditorMenuItem(editorEntry.Key, editorEntry.Value);
+            }
+        }
+
+        private void OnCustomEditorAdded(object sender, CustomEditorDescriptorEventArgs e)
+        {
+            RunOnUiThread(() => AddCustomEditorMenuItem(e.EditorId, e.EditorName));
+        }
+
+        private void OnCustomEditorRemoved(object sender, CustomEditorDescriptorEventArgs e)
+        {
+            RunOnUiThread(() => RemoveCustomEditorMenuItem(e.EditorId));
+        }
+
+        private void OnCustomEditorUpdated(object sender, CustomEditorDescriptorEventArgs e)
+        {
+            RunOnUiThread(() => UpdateCustomEditorMenuItem(e.EditorId, e.EditorName));
+        }
+
+        private void OnCustomEditorVisibilityChanged(object sender, CustomEditorVisibilityChangedEventArgs e)
+        {
+            RunOnUiThread(() => SetCustomEditorMenuItemVisibility(e.EditorId, e.IsVisible));
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (Dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            Dispatcher.InvokeAsync(action);
+        }
+
+        private void AddCustomEditorMenuItem([NotNull] string editorId, [NotNull] string header)
+        {
+            if (customEditorMenuItems.ContainsKey(editorId))
+                return;
+
+            var menuItem = new MenuItem
+            {
+                Header = header,
+                Tag = editorId,
+                IsCheckable = true,
+                IsChecked = customEditorsService.IsEditorVisible(editorId),
+            };
+
+            menuItem.Click += OnCustomEditorMenuItemClick;
+            customEditorMenuItems.Add(editorId, menuItem);
+            ViewMenuItem.Items.Add(menuItem);
+        }
+
+        private void RemoveCustomEditorMenuItem([NotNull] string editorId)
+        {
+            if (!customEditorMenuItems.TryGetValue(editorId, out var menuItem))
+                return;
+
+            menuItem.Click -= OnCustomEditorMenuItemClick;
+            ViewMenuItem.Items.Remove(menuItem);
+            customEditorMenuItems.Remove(editorId);
+        }
+
+        private void UpdateCustomEditorMenuItem([NotNull] string editorId, [NotNull] string header)
+        {
+            if (!customEditorMenuItems.TryGetValue(editorId, out var menuItem))
+                return;
+
+            menuItem.Header = header;
+        }
+
+        private void SetCustomEditorMenuItemVisibility([NotNull] string editorId, bool isVisible)
+        {
+            if (!customEditorMenuItems.TryGetValue(editorId, out var menuItem))
+                return;
+
+            menuItem.IsChecked = isVisible;
+        }
+
+        private async void OnCustomEditorMenuItemClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuItem { Tag: string editorId })
+            {
+                try
+                {
+                    await customEditorsService.SetVisibleAsync(editorId, ((MenuItem)sender).IsChecked);
+                }
+                catch (Exception exception)
+                {
+                    Logger.Error($"Unable to change visibility of custom editor '{editorId}'.", exception);
+                    ((MenuItem)sender).IsChecked = customEditorsService.IsEditorVisible(editorId);
+                }
+            }
+        }
+
+        private object GetOrCreateCustomEditorDockHandle(string editorId)
+        {
+            var pane = AvalonDockHelper.GetAllAnchorables(dockingLayout.DockingManager)
+                .FirstOrDefault(x => string.Equals(x.ContentId, editorId, StringComparison.Ordinal));
+            if (pane != null)
+                return pane;
+
+            pane = new LayoutAnchorable
+            {
+                CanClose = true,
+                ContentId = editorId,
+            };
+
+            AvalonDockHelper.GetDocumentPane(dockingLayout.DockingManager).Children.Add(pane);
+            return pane;
+        }
+
+        private static bool IsCustomEditorDockHandleAttached(object dockHandle)
+        {
+            return dockHandle is LayoutAnchorable { Root: not null };
+        }
+
+        private static void CloseCustomEditorDockHandle(object dockHandle)
+        {
+            if (dockHandle is LayoutAnchorable { Root: not null } pane)
+                pane.Close();
+        }
 
         /// <inheritdoc />
         public Task<bool> TryClose()
@@ -255,10 +432,12 @@ namespace Stride.GameStudio.View
                 dockingLayout.ReloadCurrentLayout();
                 // Restore visible/hidden status of panes
                 GameStudioViewModel.GameStudio.Panels.LoadFromSettings();
+                GameStudioViewModel.GameStudio.MainToolbar.Workspace.LoadSettings();
                 // Initialize plugins
                 Editor.Session.ServiceProvider.Get<IAssetsPluginService>().Plugins.ForEach(x => x.InitializeSession(Editor.Session));
                 // Open assets that were being edited in the previous session
                 ReopenAssetEditors(dockingLayout.LoadOpenAssets().ToList()).Forget();
+                RestoreCustomEditors().Forget();
 
                 // Listen to clipboard
                 ClipboardMonitor.RegisterListener(this);
@@ -277,6 +456,32 @@ namespace Stride.GameStudio.View
             }
         }
 
+        private async Task RestoreCustomEditors()
+        {
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+
+            foreach (var savedCustomEditor in dockingLayout.LoadOpenCustomEditors())
+            {
+                var separator = savedCustomEditor.IndexOf("::", StringComparison.Ordinal);
+                var customEditorId = separator < 0 ? savedCustomEditor : savedCustomEditor[..separator];
+                var instanceId = separator < 0 ? "default" : savedCustomEditor[(separator + 2)..];
+                if (customEditorsService.AvailableEditorTypes.ContainsKey(customEditorId))
+                    await TryShowCustomEditor(customEditorId, "startup restore", instanceId);
+            }
+        }
+
+        private async Task TryShowCustomEditor(string editorId, string context, string instanceId = "default")
+        {
+            try
+            {
+                await customEditorsService.OpenAsync(editorId, instanceId);
+            }
+            catch (Exception exception)
+            {
+                Logger.Error($"Unable to show custom editor '{editorId}' during {context}.", exception);
+            }
+        }
+
         private async Task SaveAndClose()
         {
             try
@@ -284,7 +489,7 @@ namespace Stride.GameStudio.View
                 // Save MRUs
                 if (Editor.Session != null)
                 {
-                    var openedAssets = assetEditorsManager.OpenedAssets.ToList();
+                    var openedAssets = assetEditorsManager.OpenedAssets;
                     if (!await Editor.Session.Close())
                     {
                         closingTask?.SetResult(false);
@@ -302,6 +507,7 @@ namespace Stride.GameStudio.View
 
                     // Save opened assets
                     dockingLayout.SaveOpenAssets(openedAssets);
+                    dockingLayout.SaveOpenCustomEditors(customEditorsService.OpenInstances.Select(x => $"{x.EditorId}::{x.InstanceId}"));
                     // Save layout
                     dockingLayout.SaveCurrentLayout();
                 }
@@ -349,7 +555,7 @@ namespace Stride.GameStudio.View
             foreach (var asset in assets)
             {
                 // HACK: temporary open and await asset editor sequentially
-                await assetEditorsManager.OpenAssetEditorWindow(asset, false);
+                await assetEditorsManager.OpenAssetEditorWindow(asset, saveSettings: false, forceNewInstance: false);
             }
             // Close remaining hidden windows (i.e. windows that failed to load, or which asset is not available anymore)
             assetEditorsManager.CloseAllHiddenWindows();
@@ -401,7 +607,7 @@ namespace Stride.GameStudio.View
 
             Editor.Session.ActiveAssetView.SelectAssets(asset.Yield());
 
-            await assetEditorsManager.OpenAssetEditorWindow(asset);
+            await assetEditorsManager.OpenAssetEditorWindow(asset, false, false);
         }
 
         private void OpenDebugWindow()

@@ -4,10 +4,13 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Stride.Core.Assets.Editor.Services;
 using Stride.Core.Assets.Editor.ViewModel;
 using Stride.Core.Presentation.Controls;
+using Stride.Assets.Presentation.AssetEditors.SceneEditor.SceneInteractions;
 using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewModels;
+using Stride.Assets.Presentation.SceneEditor.Widgets.ViewModels;
 
 namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Views
 {
@@ -46,6 +49,7 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Views
 
             SceneView.Content = hierarchyEditor.Controller.EditorHost;
             SceneView.InvalidateVisual();
+            hierarchyEditor.NotifySceneViewActivated();
 
             editorInitializationNotifier.SetResult();
             return true;
@@ -54,11 +58,21 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Views
         protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
         {
             base.OnPreviewMouseDown(e);
+            if (DataContext is EntityHierarchyEditorViewModel editor)
+                editor.NotifySceneViewActivated();
+
             // We give the focus to the editor so shortcuts will work
             if (!IsKeyboardFocusWithin && !(e.OriginalSource is GameEngineHost))
             {
                 Keyboard.Focus(this);
             }
+        }
+
+        protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+        {
+            base.OnGotKeyboardFocus(e);
+            if (DataContext is EntityHierarchyEditorViewModel editor)
+                editor.NotifySceneViewActivated();
         }
 
         private void EditorPreviewKeyDown(object sender, KeyEventArgs e)
@@ -75,10 +89,78 @@ namespace Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Views
             }
         }
 
+        private void SceneContextMenuOpening(object sender, ContextMenuEventArgs e)
+        {
+            if (DataContext is EntityHierarchyEditorViewModel { ShouldOpenSceneContextMenu: false })
+                e.Handled = true;
+        }
+
+        private void ScenePreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (IsSceneWidgetPath(e.OriginalSource as DependencyObject))
+                return;
+
+            if (DataContext is EntityHierarchyEditorViewModel editor
+                && editor.CanCustomToolHandleSceneMouseClick(SceneEditorMouseButton.Right)
+                && !editor.IsCustomToolDefaultSceneInputEnabled(SceneEditorDefaultInput.RightClickCameraControl))
+                e.Handled = true;
+        }
+
+        private bool IsSceneWidgetPath(DependencyObject element)
+        {
+            while (element != null)
+            {
+                if (ReferenceEquals(element, LeftSceneWidgetListBox)
+                    || ReferenceEquals(element, RightSceneWidgetListBox)
+                    || ReferenceEquals(element, BottomSceneWidgetListBox))
+                    return true;
+
+                element = VisualTreeHelper.GetParent(element);
+            }
+
+            return false;
+        }
+
         private void LoadOrLockButton_OnClick(object sender, RoutedEventArgs e)
         {
             var button = (Button)sender;
             button.CommandParameter = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        }
+
+        private void SceneWidgetListBox_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+        {
+            if (DataContext is EntityHierarchyEditorViewModel { SceneWidgets: { } sceneWidgets })
+                sceneWidgets.SetWidgetDragInProgress(true);
+        }
+
+        private void SceneWidgetListBox_Drop(object sender, DragEventArgs e)
+        {
+            if (DataContext is EntityHierarchyEditorViewModel { SceneWidgets: { } sceneWidgets })
+                sceneWidgets.SetWidgetDragInProgress(false);
+        }
+
+        private void SceneWidgetListBox_DragLeave(object sender, DragEventArgs e)
+        {
+            if (DataContext is EntityHierarchyEditorViewModel { SceneWidgets: { } sceneWidgets })
+                sceneWidgets.SetWidgetDragInProgress(false);
+        }
+
+        private void SceneWidgetListBox_QueryContinueDrag(object sender, QueryContinueDragEventArgs e)
+        {
+            if (DataContext is not EntityHierarchyEditorViewModel { SceneWidgets: { } sceneWidgets })
+                return;
+
+            if (e.Action == DragAction.Continue)
+                return;
+
+            sceneWidgets.SetWidgetDragInProgress(false);
+        }
+
+        protected override void OnPreviewMouseUp(MouseButtonEventArgs e)
+        {
+            base.OnPreviewMouseUp(e);
+            if (DataContext is EntityHierarchyEditorViewModel { SceneWidgets: { } sceneWidgets })
+                sceneWidgets.SetWidgetDragInProgress(false);
         }
     }
 }
